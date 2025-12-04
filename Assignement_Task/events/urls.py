@@ -1,12 +1,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import EventViewSet, RSVPViewSet, ReviewViewSet
+from .views import EventViewSet, RSVPViewSet, ReviewViewSet , RegisterView  
 
 router = DefaultRouter()
-router.register("events", EventViewSet, basename="events")
-router.register("rsvp", RSVPViewSet, basename="rsvp")
-router.register("reviews", ReviewViewSet, basename="reviews")
+router.register(r"events", EventViewSet, basename="event")
+router.register(r"rsvp", RSVPViewSet, basename="rsvp")
+router.register(r"reviews", ReviewViewSet, basename="review")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("auth/register/", RegisterView.as_view(), name="register"),
 ]

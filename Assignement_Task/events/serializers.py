@@ -46,9 +46,9 @@ class EventSerializer(serializers.ModelSerializer):
         ratings = obj.reviews.all().values_list("rating", flat=True)
         return round(sum(ratings) / len(ratings), 2) if ratings else None
 
-    def create(self, validated_data):
-        user = self.context["request"].user
-        return Event.objects.create(owner=user, **validated_data)
+    # def create(self, validated_data):
+    #     user = self.context["request"].user
+    #     return Event.objects.create(owner=user, **validated_data)
 
 
 # -----------------------------
@@ -83,3 +83,21 @@ class ReviewSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         event = self.context["event"]
         return Review.objects.create(user=user, event=event, **validated_data)
+from rest_framework import serializers
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    class Meta:
+        model = User
+        fields = ["id", "username", "email", "password"]
+
+    def create(self, validated_data):
+        # Use create_user so password is hashed
+        password = validated_data.pop("password")
+        user = User.objects.create_user(password=password, **validated_data)
+        return user

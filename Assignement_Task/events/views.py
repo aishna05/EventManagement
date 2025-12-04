@@ -20,6 +20,7 @@ class EventViewSet(viewsets.ModelViewSet):
     filterset_fields = ["is_public", "location"]
     ordering_fields = ["start_time", "title"]
     ordering = ["start_time"]
+    permission_classes = [AllowAny]
 
     def get_permissions(self):
 
@@ -39,7 +40,7 @@ class EventViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             return [AllowAny()]
 
-        return [AllowAny()]
+        return [permission() for permission in self.permission_classes]
     
     def get_queryset(self):
         """Public list → show only public events"""
@@ -94,7 +95,7 @@ class RSVPViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return RSVP.objects.filter(user=self.request.user)
 
-
+    
 # -----------------------------------
 # REVIEW VIEWSET
 # -----------------------------------
@@ -123,3 +124,13 @@ class ReviewViewSet(viewsets.ModelViewSet):
         serializer.save()
 
         return Response(serializer.data, status=201)
+from rest_framework import generics, permissions
+from .serializers import RegisterSerializer
+
+
+class RegisterView(generics.CreateAPIView):
+    """
+    POST /api/auth/register/ → create a new user account
+    """
+    serializer_class = RegisterSerializer
+    permission_classes = [permissions.AllowAny]

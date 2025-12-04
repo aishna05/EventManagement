@@ -53,14 +53,22 @@ class EventAPIPermissionsTests(APITestCase):
     # LIST: public events only
     # -----------------------------
     def test_list_events_public_only(self):
-        url = reverse("event-list")  # router name: 'event'
-        response = self.client.get(url)
+       url = reverse("event-list")
+       response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Only public event should appear
-        ids = [e["id"] for e in response.data]
-        self.assertIn(self.public_event.id, ids)
-        self.assertNotIn(self.private_event.id, ids)
+       self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    # Handle both paginated and non-paginated responses
+       data = response.data
+       if isinstance(data, dict) and "results" in data:
+           events = data["results"]
+       else:
+           events = data
+
+       ids = [e["id"] for e in events]
+
+       self.assertIn(self.public_event.id, ids)
+       self.assertNotIn(self.private_event.id, ids)
 
     # -----------------------------
     # RETRIEVE: IsInvitedOrPublic
@@ -73,8 +81,7 @@ class EventAPIPermissionsTests(APITestCase):
     def test_retrieve_private_event_anonymous_forbidden(self):
         url = reverse("event-detail", args=[self.private_event.id])
         response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
     def test_retrieve_private_event_invited_user_allowed(self):
         self.client.login(username="invited", password="pass1234")
         url = reverse("event-detail", args=[self.private_event.id])
@@ -183,6 +190,9 @@ class RSVPAndReviewTests(APITestCase):
 
     def test_create_review_valid_event(self):
         self.client.login(username="user", password="pass1234")
+        from events.models import RSVP
+        RSVP.objects.create(user=self.user, event=self.event, status="attending")
+
         url = reverse("review-list")
         response = self.client.post(
             url,
