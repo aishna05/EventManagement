@@ -65,8 +65,12 @@ class RSVPSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = self.context["request"].user
         event = self.context["event"]
-        return RSVP.objects.create(user=user, event=event, **validated_data)
-
+        rsvp, created = RSVP.objects.update_or_create(
+            user=user,
+            event=event,
+            defaults=validated_data,  # e.g. {"status": "attending"}
+        )
+        return rsvp
 
 # -----------------------------
 # REVIEW SERIALIZER

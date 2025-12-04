@@ -208,7 +208,7 @@ If the user has not RSVPed to the event:
   "detail": "You must RSVP to this event before leaving a review."
 }
 ```
-
+### 5. home page `/api/home/`
 ---
 
 ##  Extra: Computed Fields on Events

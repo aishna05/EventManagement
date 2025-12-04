@@ -1,5 +1,5 @@
 # Create your views here.
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from rest_framework import viewsets, status, filters
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -10,6 +10,9 @@ from .models import Event, RSVP, Review
 from .serializers import EventSerializer, RSVPSerializer, ReviewSerializer
 from .permissions import IsOrganizerOrReadOnly, IsInvitedOrPublic
 
+
+def home(request):
+    return render(request, "index.html")
 class EventViewSet(viewsets.ModelViewSet):
     queryset = Event.objects.all()
     serializer_class = EventSerializer

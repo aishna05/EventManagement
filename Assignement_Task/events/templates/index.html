@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Event Management Frontend</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      background: #f4f4f4;
+    }
+    header {
+      background: #1f2937;
+      color: white;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo {
+      font-weight: 700;
+      font-size: 1.2rem;
+    }
+    .container {
+      display: flex;
+      padding: 1rem;
+      gap: 1rem;
+      height: calc(100vh - 72px);
+      box-sizing: border-box;
+    }
+    .column {
+      background: white;
+      border-radius: 8px;
+      padding: 1rem;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+      overflow-y: auto;
+    }
+    .left {
+      flex: 1;
+      min-width: 280px;
+    }
+    .right {
+      flex: 2;
+      min-width: 340px;
+    }
+    h2, h3, h4 {
+      margin-top: 0;
+    }
+    button {
+      border: none;
+      padding: 0.4rem 0.7rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button.primary {
+      background: #2563eb;
+      color: white;
+    }
+    button.danger {
+      background: #dc2626;
+      color: white;
+    }
+    button.secondary {
+      background: #e5e7eb;
+      color: #111827;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 0.4rem 0.5rem;
+      margin-bottom: 0.6rem;
+      border-radius: 4px;
+      border: 1px solid #d1d5db;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+    }
+    .event-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 0.6rem;
+      margin-bottom: 0.5rem;
+      cursor: pointer;
+    }
+    .event-card.selected {
+      border-color: #2563eb;
+      background: #eff6ff;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      background: #e5e7eb;
+      margin-right: 0.2rem;
+    }
+    .badge.public { background: #dcfce7; }
+    .badge.private { background: #fee2e2; }
+    .row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .tagline {
+      font-size: 0.85rem;
+      color: #9ca3af;
+    }
+    .error {
+      color: #b91c1c;
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+    .success {
+      color: #15803d;
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+    .section {
+      margin-bottom: 1rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 0.6rem;
+    }
+    .pill-buttons button {
+      margin-right: 0.3rem;
+      margin-bottom: 0.3rem;
+    }
+    .review-card {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 0.4rem 0;
+    }
+    .small {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">Event Management Dashboard</div>
+    <div id="auth-status" class="tagline"></div>
+  </header>
+
+  <div id="root"></div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+
+    // Generic API helper
+    async function apiFetch(path, { method = "GET", body = null } = {}, token = null) {
+      const headers = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(API_BASE + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : null,
+      });
+
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (e) {
+        // no JSON body
+      }
+
+      if (!res.ok) {
+        const message =
+          (data && (data.detail || data.error || JSON.stringify(data))) ||
+          `Request failed with status ${res.status}`;
+        throw new Error(message);
+      }
+      return data;
+    }
+
+    // App State
+    let appState = {
+      token: localStorage.getItem("accessToken") || null,
+      events: [],
+      selectedEvent: null,
+      loadingEvents: false,
+      showCreateForm: false,
+      authMode: "login",
+      username: "",
+      password: "",
+      email: "",
+      fullName: "",
+      authError: "",
+      authSuccess: "",
+      authLoading: false,
+    };
+
+    // Render
+    function render() {
+      const root = document.getElementById("root");
+      root.innerHTML = "";
+
+      // Auth Panel
+      const authPanel = createAuthPanel();
+      root.appendChild(authPanel);
+
+      if (appState.token) {
+        const container = document.createElement("div");
+        container.className = "container";
+        container.appendChild(createEventList());
+        container.appendChild(createRightPanel());
+        root.appendChild(container);
+      }
+
+      updateAuthStatus();
+    }
+
+    function createAuthPanel() {
+      const div = document.createElement("div");
+      div.className = "container";
+      div.style.height = "auto";
+      div.style.paddingBottom = "0";
+
+      const column = document.createElement("div");
+      column.className = "column left";
+
+      const title = document.createElement("h2");
+      title.textContent = "Authentication";
+      column.appendChild(title);
+
+      if (appState.authError) {
+        const error = document.createElement("div");
+        error.className = "error";
+        error.textContent = appState.authError;
+        column.appendChild(error);
+      }
+
+      if (appState.authSuccess) {
+        const success = document.createElement("div");
+        success.className = "success";
+        success.textContent = appState.authSuccess;
+        column.appendChild(success);
+      }
+
+      const row = document.createElement("div");
+      row.className = "row";
+      row.style.marginBottom = "0.5rem";
+
+      const loginBtn = document.createElement("button");
+      loginBtn.className = appState.authMode === "login" ? "primary" : "secondary";
+      loginBtn.textContent = "Login";
+      loginBtn.onclick = () => {
+        appState.authMode = "login";
+        render();
+      };
+      row.appendChild(loginBtn);
+
+      const registerBtn = document.createElement("button");
+      registerBtn.className = appState.authMode === "register" ? "primary" : "secondary";
+      registerBtn.textContent = "Register";
+      registerBtn.onclick = () => {
+        appState.authMode = "register";
+        render();
+      };
+      row.appendChild(registerBtn);
+
+      const spacer = document.createElement("div");
+      spacer.className = "spacer";
+      row.appendChild(spacer);
+
+      if (appState.token) {
+        const logoutBtn = document.createElement("button");
+        logoutBtn.className = "danger";
+        logoutBtn.textContent = "Logout";
+        logoutBtn.onclick = handleLogout;
+        row.appendChild(logoutBtn);
+      }
+
+      column.appendChild(row);
+
+      const form = document.createElement("form");
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        if (appState.authMode === "login") {
+          handleLogin();
+        } else {
+          handleRegister();
+        }
+      };
+
+      const usernameLabel = document.createElement("label");
+      usernameLabel.textContent = "Username";
+      form.appendChild(usernameLabel);
+
+      const usernameInput = document.createElement("input");
+      usernameInput.type = "text";
+      usernameInput.value = appState.username;
+      usernameInput.onchange = (e) => {
+        appState.username = e.target.value;
+      };
+      usernameInput.required = true;
+      form.appendChild(usernameInput);
+
+      if (appState.authMode === "register") {
+        const emailLabel = document.createElement("label");
+        emailLabel.textContent = "Email";
+        form.appendChild(emailLabel);
+
+        const emailInput = document.createElement("input");
+        emailInput.type = "email";
+        emailInput.value = appState.email;
+        emailInput.onchange = (e) => {
+          appState.email = e.target.value;
+        };
+        emailInput.required = true;
+        form.appendChild(emailInput);
+
+        const nameLabel = document.createElement("label");
+        nameLabel.textContent = "Full Name (optional)";
+        form.appendChild(nameLabel);
+
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = appState.fullName;
+        nameInput.onchange = (e) => {
+          appState.fullName = e.target.value;
+        };
+        form.appendChild(nameInput);
+      }
+
+      const passwordLabel = document.createElement("label");
+      passwordLabel.textContent = "Password";
+      form.appendChild(passwordLabel);
+
+      const passwordInput = document.createElement("input");
+      passwordInput.type = "password";
+      passwordInput.value = appState.password;
+      passwordInput.onchange = (e) => {
+        appState.password = e.target.value;
+      };
+      passwordInput.required = true;
+      form.appendChild(passwordInput);
+
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "submit";
+      submitBtn.className = "primary";
+      submitBtn.disabled = appState.authLoading;
+      submitBtn.textContent = appState.authLoading
+        ? "Please wait..."
+        : appState.authMode === "login"
+        ? "Login"
+        : "Register";
+      form.appendChild(submitBtn);
+
+      column.appendChild(form);
+
+      const note = document.createElement("p");
+      note.className = "small";
+      note.textContent = "Note: These fields must match what your DRF register/login endpoints expect.";
+      column.appendChild(note);
+
+      div.appendChild(column);
+      return div;
+    }
+
+    function createEventList() {
+      const column = document.createElement("div");
+      column.className = "column left";
+
+      const headerRow = document.createElement("div");
+      headerRow.className = "row";
+
+      const title = document.createElement("h2");
+      title.textContent = "Events";
+      headerRow.appendChild(title);
+
+      const spacer = document.createElement("div");
+      spacer.className = "spacer";
+      headerRow.appendChild(spacer);
+
+      const createBtn = document.createElement("button");
+      createBtn.className = "primary";
+      createBtn.textContent = "+ Create";
+      createBtn.onclick = () => {
+        appState.showCreateForm = true;
+        render();
+      };
+      headerRow.appendChild(createBtn);
+
+      column.appendChild(headerRow);
+
+      const searchInput = document.createElement("input");
+      searchInput.type = "text";
+      searchInput.placeholder = "Search by title or location...";
+      searchInput.onkeyup = () => render();
+      column.appendChild(searchInput);
+
+      const controlRow = document.createElement("div");
+      controlRow.className = "row";
+      controlRow.style.marginBottom = "0.5rem";
+
+      const refreshBtn = document.createElement("button");
+      refreshBtn.className = "secondary";
+      refreshBtn.disabled = appState.loadingEvents;
+      refreshBtn.textContent = appState.loadingEvents ? "Refreshing..." : "Refresh";
+      refreshBtn.onclick = loadEvents;
+      controlRow.appendChild(refreshBtn);
+
+      const countSpan = document.createElement("span");
+      countSpan.className = "small";
+      const filtered = filterEvents(appState.events, searchInput.value);
+      countSpan.textContent = `${filtered.length} event(s)`;
+      controlRow.appendChild(countSpan);
+
+      column.appendChild(controlRow);
+
+      filtered.forEach((ev) => {
+        const card = document.createElement("div");
+        card.className = "event-card" + (appState.selectedEvent?.id === ev.id ? " selected" : "");
+        card.onclick = () => {
+          appState.selectedEvent = ev;
+          render();
+        };
+
+        const cardRow = document.createElement("div");
+        cardRow.className = "row";
+
+        const cardTitle = document.createElement("strong");
+        cardTitle.textContent = ev.title;
+        cardRow.appendChild(cardTitle);
+
+        const cardSpacer = document.createElement("div");
+        cardSpacer.className = "spacer";
+        cardRow.appendChild(cardSpacer);
+
+        const badge = document.createElement("span");
+        badge.className = "badge " + (ev.is_public ? "public" : "private");
+        badge.textContent = ev.is_public ? "Public" : "Private";
+        cardRow.appendChild(badge);
+
+        card.appendChild(cardRow);
+
+        const cardInfo = document.createElement("div");
+        cardInfo.className = "small";
+        cardInfo.innerHTML = `${ev.location || "No location"} · ${
+          ev.start_time ? new Date(ev.start_time).toLocaleString() : "No start time"
+        }`;
+        card.appendChild(cardInfo);
+
+        column.appendChild(card);
+      });
+
+      if (filtered.length === 0 && !appState.loadingEvents) {
+        const noEvents = document.createElement("p");
+        noEvents.className = "small";
+        noEvents.textContent = "No events found. Create one!";
+        column.appendChild(noEvents);
+      }
+
+      return column;
+    }
+
+    function createRightPanel() {
+      const wrapper = document.createElement("div");
+      wrapper.style.flex = "2";
+      wrapper.style.display = "flex";
+      wrapper.style.flexDirection = "column";
+
+      if (appState.showCreateForm && appState.token) {
+        const createFormCol = document.createElement("div");
+        createFormCol.className = "column";
+        createFormCol.style.marginBottom = "0.6rem";
+        createFormCol.appendChild(createEventForm(null));
+        wrapper.appendChild(createFormCol);
+      }
+
+      wrapper.appendChild(createEventDetail());
+
+      return wrapper;
+    }
+
+    function createEventForm(initial) {
+      const isEdit = !!initial;
+      const div = document.createElement("div");
+      div.className = "section";
+
+      const title = document.createElement("h3");
+      title.textContent = isEdit ? "Edit Event" : "Create Event";
+      div.appendChild(title);
+
+      const errorDiv = document.createElement("div");
+      errorDiv.className = "error hidden";
+      div.appendChild(errorDiv);
+
+      const form = document.createElement("form");
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        errorDiv.classList.add("hidden");
+        errorDiv.textContent = "";
+
+        try {
+          const titleInput = form.querySelector("input[placeholder='Title']");
+          const descInput = form.querySelector("textarea");
+          const locInput = form.querySelector("input[placeholder='Location']");
+          const startInput = form.querySelectorAll("input[type='datetime-local']")[0];
+          const endInput = form.querySelectorAll("input[type='datetime-local']")[1];
+          const isPublicCheckbox = form.querySelector("input[type='checkbox']");
+
+          const payload = {
+            title: titleInput.value,
+            description: descInput.value,
+            location: locInput.value,
+            start_time: startInput.value ? new Date(startInput.value).toISOString() : null,
+            end_time: endInput.value ? new Date(endInput.value).toISOString() : null,
+            is_public: isPublicCheckbox.checked,
+          };
+
+          let data;
+          if (isEdit) {
+            data = await apiFetch(`/api/events/${initial.id}/`, {
+              method: "PUT",
+              body: payload,
+            }, appState.token);
+          } else {
+            data = await apiFetch("/api/events/", {
+              method: "POST",
+              body: payload,
+            }, appState.token);
+          }
+
+          appState.showCreateForm = false;
+          handleEventCreatedOrUpdated(data);
+          render();
+        } catch (err) {
+          errorDiv.classList.remove("hidden");
+          errorDiv.textContent = err.message;
+        }
+      };
+
+      const addField = (label, type = "text", placeholder = "", value = "") => {
+        const labelEl = document.createElement("label");
+        labelEl.textContent = label;
+        form.appendChild(labelEl);
+
+        const input = document.createElement(type === "textarea" ? "textarea" : "input");
+        input.type = type === "textarea" ? "" : type;
+        input.placeholder = placeholder;
+        input.value = value;
+        if (type === "textarea") input.rows = 3;
+        form.appendChild(input);
+      };
+
+      addField("Title", "text", "Title", initial?.title || "");
+      addField("Description", "textarea", "", initial?.description || "");
+      addField("Location", "text", "Location", initial?.location || "");
+      addField("Start Time", "datetime-local", "", initial?.start_time?.slice(0, 16) || "");
+      addField("End Time", "datetime-local", "", initial?.end_time?.slice(0, 16) || "");
+
+      const labelCheckbox = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = initial?.is_public ?? true;
+      labelCheckbox.appendChild(checkbox);
+      labelCheckbox.appendChild(document.createTextNode(" Public Event"));
+      form.appendChild(labelCheckbox);
+
+      const buttonRow = document.createElement("div");
+      buttonRow.className = "row";
+      buttonRow.style.marginTop = "0.6rem";
+
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "submit";
+      submitBtn.className = "primary";
+      submitBtn.textContent = isEdit ? "Save Changes" : "Create Event";
+      buttonRow.appendChild(submitBtn);
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "secondary";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = () => {
+        appState.showCreateForm = false;
+        render();
+      };
+      buttonRow.appendChild(cancelBtn);
+
+      form.appendChild(buttonRow);
+      div.appendChild(form);
+
+      return div;
+    }
+
+    function createEventDetail() {
+      const column = document.createElement("div");
+      column.className = "column right";
+
+      if (!appState.selectedEvent) {
+        const title = document.createElement("h2");
+        title.textContent = "Event Details";
+        column.appendChild(title);
+
+        const p = document.createElement("p");
+        p.className = "small";
+        p.textContent = "Select an event from the left list to see details.";
+        column.appendChild(p);
+
+        return column;
+      }
+
+      const ev = appState.selectedEvent;
+
+      const headerRow = document.createElement("div");
+      headerRow.className = "row";
+
+      const title = document.createElement("h2");
+      title.textContent = ev.title;
+      headerRow.appendChild(title);
+
+      const spacer = document.createElement("div");
+      spacer.className = "spacer";
+      headerRow.appendChild(spacer);
+
+      const badge = document.createElement("span");
+      badge.className = "badge " + (ev.is_public ? "public" : "private");
+      badge.textContent = ev.is_public ? "Public" : "Private";
+      headerRow.appendChild(badge);
+
+      column.appendChild(headerRow);
+
+      const messageDiv = document.createElement("div");
+      messageDiv.className = "success hidden";
+      messageDiv.id = "detail-message";
+      column.appendChild(messageDiv);
+
+      const errorDiv = document.createElement("div");
+      errorDiv.className = "error hidden";
+      errorDiv.id = "detail-error";
+      column.appendChild(errorDiv);
+
+      const desc = document.createElement("p");
+      desc.textContent = ev.description || "";
+      if (!ev.description) {
+        desc.innerHTML = '<span class="small">No description</span>';
+      }
+      column.appendChild(desc);
+
+      const infoP = document.createElement("p");
+      infoP.className = "small";
+      infoP.innerHTML = `
+        Location: <strong>${ev.location || "N/A"}</strong><br />
+        Start: ${ev.start_time ? new Date(ev.start_time).toLocaleString() : "N/A"}<br />
+        End: ${ev.end_time ? new Date(ev.end_time).toLocaleString() : "N/A"}
+      `;
+      column.appendChild(infoP);
+
+      // RSVP Section
+      const rsvpSection = document.createElement("div");
+      rsvpSection.className = "section";
+
+      const rsvpTitle = document.createElement("h3");
+      rsvpTitle.textContent = "RSVP";
+      rsvpSection.appendChild(rsvpTitle);
+
+      const rsvpButtons = document.createElement("div");
+      rsvpButtons.className = "pill-buttons";
+
+      ["Going", "Maybe", "Not Going"].forEach((status) => {
+        const btn = document.createElement("button");
+        btn.className = "secondary";
+        btn.textContent = status;
+        btn.onclick = () => handleRSVP(ev.id, status);
+        rsvpButtons.appendChild(btn);
+      });
+
+      rsvpSection.appendChild(rsvpButtons);
+      column.appendChild(rsvpSection);
+
+      // Reviews Section
+      const reviewSection = document.createElement("div");
+      reviewSection.className = "section";
+
+      const reviewHeader = document.createElement("div");
+      reviewHeader.className = "row";
+
+      const reviewTitle = document.createElement("h3");
+      reviewTitle.textContent = "Reviews";
+      reviewHeader.appendChild(reviewTitle);
+
+      const reviewSpacer = document.createElement("div");
+      reviewSpacer.className = "spacer";
+      reviewHeader.appendChild(reviewSpacer);
+
+      const reloadBtn = document.createElement("button");
+      reloadBtn.className = "secondary";
+      reloadBtn.textContent = "Reload";
+      reloadBtn.onclick = () => loadReviews(ev.id);
+      reviewHeader.appendChild(reloadBtn);
+
+      reviewSection.appendChild(reviewHeader);
+      reviewSection.id = "reviews-container";
+      column.appendChild(reviewSection);
+
+      const addReviewForm = document.createElement("form");
+      addReviewForm.onsubmit = (e) => handleAddReview(e, ev.id);
+      addReviewForm.style.marginTop = "0.5rem";
+
+      const addReviewTitle = document.createElement("h4");
+      addReviewTitle.textContent = "Add Review";
+      addReviewForm.appendChild(addReviewTitle);
+
+      const ratingLabel = document.createElement("label");
+      ratingLabel.textContent = "Rating (1-5)";
+      addReviewForm.appendChild(ratingLabel);
+
+      const ratingSelect = document.createElement("select");
+      [1, 2, 3, 4, 5].forEach((n) => {
+        const option = document.createElement("option");
+        option.value = n;
+        option.textContent = n;
+        option.selected = n === 5;
+        ratingSelect.appendChild(option);
+      });
+      addReviewForm.appendChild(ratingSelect);
+
+      const commentLabel = document.createElement("label");
+      commentLabel.textContent = "Comment";
+      addReviewForm.appendChild(commentLabel);
+
+      const textarea = document.createElement("textarea");
+      textarea.rows = 2;
+      textarea.required = true;
+      addReviewForm.appendChild(textarea);
+
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "submit";
+      submitBtn.className = "primary";
+      submitBtn.textContent = "Submit Review";
+      addReviewForm.appendChild(submitBtn);
+
+      reviewSection.appendChild(addReviewForm);
+
+      // Organizer Actions
+      const orgSection = document.createElement("div");
+      orgSection.className = "section";
+
+      const orgTitle = document.createElement("h3");
+      orgTitle.textContent = "Organizer Actions";
+      orgSection.appendChild(orgTitle);
+
+      const orgNote = document.createElement("p");
+      orgNote.className = "small";
+      orgNote.textContent = "These actions will only succeed if the logged-in user is the organizer (as enforced by your DRF permissions).";
+      orgSection.appendChild(orgNote);
+
+      const orgRow = document.createElement("div");
+      orgRow.className = "row";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "secondary";
+      editBtn.textContent = "Edit Event";
+      editBtn.onclick = () => {
+        const formDiv = orgSection.querySelector(".edit-form");
+        if (formDiv) {
+          formDiv.classList.toggle("hidden");
+          editBtn.textContent = formDiv.classList.contains("hidden") ? "Edit Event" : "Hide Edit Form";
+        }
+      };
+      orgRow.appendChild(editBtn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "danger";
+      deleteBtn.textContent = "Delete Event";
+      deleteBtn.onclick = () => handleDeleteEvent(ev.id);
+      orgRow.appendChild(deleteBtn);
+
+      orgSection.appendChild(orgRow);
+
+      const editFormDiv = document.createElement("div");
+      editFormDiv.className = "edit-form hidden";
+      editFormDiv.appendChild(createEventForm(ev));
+      orgSection.appendChild(editFormDiv);
+
+      column.appendChild(orgSection);
+
+      loadReviews(ev.id);
+
+      return column;
+    }
+
+    function filterEvents(events, searchTerm) {
+      return events.filter((ev) =>
+        ev.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (ev.location || "").toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    async function handleLogin() {
+      appState.authError = "";
+      appState.authSuccess = "";
+      appState.authLoading = true;
+      render();
+
+      try {
+        // Adjust this path if your token URL is different (e.g. "/api/token/")
+        const data = await apiFetch("/api/auth/token/", {
+          method: "POST",
+          body: { username: appState.username, password: appState.password },
+        });
+        const access = data.access;
+        localStorage.setItem("accessToken", access);
+        appState.token = access;
+        appState.authSuccess = "Login successful";
+        appState.username = "";
+        appState.password = "";
+        appState.email = "";
+        appState.fullName = "";
+        await loadEvents();
+      } catch (err) {
+        appState.authError = err.message;
+      } finally {
+        appState.authLoading = false;
+        render();
+      }
+    }
+
+    async function handleRegister() {
+      appState.authError = "";
+      appState.authSuccess = "";
+      appState.authLoading = true;
+      render();
+
+      try {
+        await apiFetch("/api/auth/register/", {
+          method: "POST",
+          body: {
+            username: appState.username,
+            password: appState.password,
+            email: appState.email,
+            // send full_name only if your backend RegisterSerializer supports it
+            // full_name: appState.fullName,
+          },
+        });
+        appState.authSuccess = "Registration successful. You can now log in.";
+        appState.authMode = "login";
+        appState.username = "";
+        appState.password = "";
+        appState.email = "";
+        appState.fullName = "";
+      } catch (err) {
+        appState.authError = err.message;
+      } finally {
+        appState.authLoading = false;
+        render();
+      }
+    }
+
+    function handleLogout() {
+      localStorage.removeItem("accessToken");
+      appState.token = null;
+      appState.selectedEvent = null;
+      appState.events = [];
+      appState.showCreateForm = false;
+      render();
+    }
+
+    async function loadEvents() {
+      appState.loadingEvents = true;
+      render();
+
+      try {
+        const data = await apiFetch("/api/events/", {}, appState.token);
+        const list = Array.isArray(data) ? data : data.results || [];
+        appState.events = list;
+        if (appState.selectedEvent) {
+          appState.selectedEvent = list.find((e) => e.id === appState.selectedEvent.id) || null;
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to fetch events: " + err.message);
+      } finally {
+        appState.loadingEvents = false;
+        render();
+      }
+    }
+
+    async function loadReviews(eventId) {
+      try {
+        const data = await apiFetch(`/api/events/${eventId}/reviews/`, {}, appState.token);
+        const list = Array.isArray(data) ? data : data.results || [];
+
+        const container = document.getElementById("reviews-container");
+        if (!container) return;
+
+        let existingReviews = container.querySelector(".reviews-list");
+        if (!existingReviews) {
+          existingReviews = document.createElement("div");
+          existingReviews.className = "reviews-list";
+          container.appendChild(existingReviews);
+        }
+
+        existingReviews.innerHTML = "";
+
+        if (list.length === 0) {
+          const p = document.createElement("p");
+          p.className = "small";
+          p.textContent = "No reviews yet.";
+          existingReviews.appendChild(p);
+        } else {
+          list.forEach((rev) => {
+            const card = document.createElement("div");
+            card.className = "review-card";
+
+            const rating = document.createElement("div");
+            rating.className = "small";
+            rating.textContent = `Rating: ${rev.rating} / 5`;
+            card.appendChild(rating);
+
+            const comment = document.createElement("div");
+            comment.textContent = rev.comment;
+            card.appendChild(comment);
+
+            const info = document.createElement("div");
+            info.className = "small";
+            const username = rev.user && rev.user.username ? rev.user.username : "Unknown";
+            info.textContent = `By ${username}${
+              rev.created_at ? " on " + new Date(rev.created_at).toLocaleString() : ""
+            }`;
+            card.appendChild(info);
+
+            existingReviews.appendChild(card);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load reviews:", err);
+      }
+    }
+
+    async function handleRSVP(eventId, label) {
+      // Map UI labels → backend status choices
+      const statusMap = {
+        "Going": "attending",
+        "Maybe": "maybe",
+        "Not Going": "not_going",
+      };
+      const status = statusMap[label] || "maybe";
+
+      try {
+        await apiFetch(`/api/events/${eventId}/rsvp/`, {
+          method: "POST",
+          body: { status },
+        }, appState.token);
+
+        const messageDiv = document.getElementById("detail-message");
+        if (messageDiv) {
+          messageDiv.textContent = `RSVP updated: ${label}`;
+          messageDiv.classList.remove("hidden");
+          setTimeout(() => messageDiv.classList.add("hidden"), 3000);
+        }
+      } catch (err) {
+        const errorDiv = document.getElementById("detail-error");
+        if (errorDiv) {
+          errorDiv.textContent = err.message;
+          errorDiv.classList.remove("hidden");
+        }
+      }
+    }
+
+    async function handleAddReview(e, eventId) {
+      e.preventDefault();
+
+      const form = e.target;
+      const ratingSelect = form.querySelector("select");
+      const textarea = form.querySelector("textarea");
+
+      try {
+        // IMPORTANT: create review via /api/reviews/ with event_id
+        await apiFetch(`/api/reviews/`, {
+          method: "POST",
+          body: {
+            event_id: eventId,
+            rating: Number(ratingSelect.value),
+            comment: textarea.value,
+          },
+        }, appState.token);
+
+        const messageDiv = document.getElementById("detail-message");
+        if (messageDiv) {
+          messageDiv.textContent = "Review added";
+          messageDiv.classList.remove("hidden");
+          setTimeout(() => messageDiv.classList.add("hidden"), 3000);
+        }
+
+        textarea.value = "";
+        ratingSelect.value = 5;
+        loadReviews(eventId);
+      } catch (err) {
+        const errorDiv = document.getElementById("detail-error");
+        if (errorDiv) {
+          errorDiv.textContent = err.message;
+          errorDiv.classList.remove("hidden");
+        }
+      }
+    }
+
+    async function handleDeleteEvent(eventId) {
+      if (!confirm("Are you sure you want to delete this event?")) return;
+
+      try {
+        await apiFetch(`/api/events/${eventId}/`, { method: "DELETE" }, appState.token);
+        appState.selectedEvent = null;
+        appState.events = appState.events.filter((e) => e.id !== eventId);
+        render();
+      } catch (err) {
+        alert("Failed to delete event: " + err.message);
+      }
+    }
+
+    function handleEventCreatedOrUpdated(event) {
+      appState.showCreateForm = false;
+      const exists = appState.events.find((e) => e.id === event.id);
+      if (exists) {
+        appState.events = appState.events.map((e) => (e.id === event.id ? event : e));
+      } else {
+        appState.events = [event, ...appState.events];
+      }
+      appState.selectedEvent = event;
+    }
+
+    function updateAuthStatus() {
+      const el = document.getElementById("auth-status");
+      if (appState.token) {
+        el.textContent = "Logged in (JWT active)";
+      } else {
+        el.textContent = "Not logged in";
+      }
+    }
+
+    // If token exists from previous session, load events on start
+    if (appState.token) {
+      loadEvents();
+    }
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>

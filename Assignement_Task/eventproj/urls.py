@@ -24,6 +24,6 @@ urlpatterns = [
     path("api/auth/token/", TokenObtainPairView.as_view(), name="jwt_login"),
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="jwt_refresh"),
 
-    path("api/", include("events.urls")),
+    path("api/",include("events.urls")),
 ]
 
